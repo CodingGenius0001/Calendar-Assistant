@@ -310,44 +310,76 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
   if (!session) {
     return (
       <main className="soft-grid min-h-screen px-5 py-8 text-[var(--foreground)] md:px-10 md:py-10">
-        <section className="glass-panel mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl flex-col justify-center gap-8 rounded-[2rem] border p-8 md:p-12">
-          <div className="space-y-6">
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(17,32,51,0.12)] bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm font-medium text-[var(--muted)]">
-              <span className="inline-flex size-2 rounded-full bg-[var(--signal)]" />
-              Simple voice scheduling
+        <section className="glass-panel mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center gap-10 rounded-[2rem] border p-8 md:p-12 lg:grid-cols-[0.92fr_1.08fr]">
+          <div className="space-y-8">
+            <div className="space-y-6">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(17,32,51,0.12)] bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm font-medium text-[var(--muted)]">
+                <span className="inline-flex size-2 rounded-full bg-[var(--signal)]" />
+                Simple voice scheduling
+              </div>
+              <div className="space-y-4">
+                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
+                  Calendar Assistant
+                </p>
+                <h1 className="display-font max-w-4xl text-5xl leading-none font-semibold tracking-tight md:text-7xl">
+                  Speak it.
+                  <br />
+                  Check it.
+                  <br />
+                  Book it.
+                </h1>
+                <p className="max-w-xl text-lg leading-8 text-[var(--muted)]">
+                  Record a request, review what the app understood, then confirm the
+                  recommended time one step at a time.
+                </p>
+              </div>
             </div>
-            <div className="space-y-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
-                Calendar Assistant
-              </p>
-              <h1 className="display-font max-w-4xl text-5xl leading-none font-semibold tracking-tight md:text-7xl">
-                Speak it.
-                <br />
-                Check it.
-                <br />
-                Book it.
-              </h1>
-              <p className="max-w-2xl text-lg leading-8 text-[var(--muted)]">
-                Record a request, review what the app understood, then confirm the
-                recommended time one step at a time.
-              </p>
+
+            <div className="flex flex-wrap gap-4">
+              <button
+                className="rounded-full bg-[var(--button)] px-6 py-3 text-base font-semibold text-white transition hover:bg-[var(--button-hover)]"
+                onClick={() => signIn("google")}
+                type="button"
+              >
+                Continue with Google
+              </button>
+            </div>
+
+            {!googleConfigured ? (
+              <div className="rounded-[1.75rem] border border-[rgba(174,69,52,0.18)] bg-[rgba(174,69,52,0.08)] p-5 text-sm leading-7 text-[var(--foreground)]">
+                Add the Google auth values from <code>.env.example</code> before sign-in
+                will work locally or on Vercel.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-[rgba(17,32,51,0.1)] bg-[linear-gradient(160deg,rgba(255,255,255,0.9),rgba(250,243,232,0.72))] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(216,140,65,0.28),transparent_24%),radial-gradient(circle_at_80%_18%,rgba(21,93,82,0.24),transparent_26%),radial-gradient(circle_at_52%_70%,rgba(17,32,51,0.12),transparent_24%)]" />
+            <div className="absolute -top-10 right-8 h-44 w-44 rounded-full bg-[rgba(216,140,65,0.2)] blur-2xl" />
+            <div className="absolute bottom-4 left-0 h-56 w-56 rounded-full bg-[rgba(21,93,82,0.18)] blur-3xl" />
+
+            <div className="relative flex h-full min-h-[372px] items-center justify-center">
+              <div className="relative h-[320px] w-full max-w-[460px]">
+                <div className="absolute left-[10%] top-[12%] h-40 w-40 rounded-[36%_64%_55%_45%/42%_42%_58%_58%] border border-[rgba(17,32,51,0.08)] bg-[linear-gradient(145deg,rgba(21,93,82,0.94),rgba(45,121,109,0.7))] shadow-[0_28px_60px_rgba(21,93,82,0.2)]" />
+                <div className="absolute right-[11%] top-[18%] h-28 w-28 rounded-full border border-[rgba(17,32,51,0.08)] bg-[rgba(255,255,255,0.86)] shadow-[0_20px_40px_rgba(17,32,51,0.1)]" />
+                <div className="absolute bottom-[7%] left-[17%] h-24 w-52 rounded-full border border-[rgba(17,32,51,0.08)] bg-[linear-gradient(120deg,rgba(17,32,51,0.08),rgba(216,140,65,0.18))] backdrop-blur-sm" />
+                <div className="absolute bottom-[19%] right-[14%] h-36 w-36 rounded-[62%_38%_33%_67%/43%_53%_47%_57%] border border-[rgba(17,32,51,0.08)] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(247,232,212,0.9))] shadow-[0_18px_42px_rgba(17,32,51,0.12)]" />
+
+                <div className="absolute left-[23%] top-[26%] rounded-[1.5rem] border border-[rgba(255,255,255,0.4)] bg-[rgba(255,255,255,0.18)] px-4 py-3 text-sm font-semibold tracking-[0.18em] text-white uppercase shadow-[0_16px_34px_rgba(17,32,51,0.18)] backdrop-blur-md">
+                  Record
+                </div>
+                <div className="absolute right-[16%] top-[40%] rounded-[1.4rem] border border-[rgba(17,32,51,0.08)] bg-[rgba(255,255,255,0.88)] px-4 py-3 text-sm font-semibold tracking-[0.18em] text-[var(--foreground)] uppercase shadow-[0_16px_34px_rgba(17,32,51,0.12)]">
+                  Review
+                </div>
+                <div className="absolute bottom-[18%] left-[34%] rounded-[1.4rem] border border-[rgba(17,32,51,0.08)] bg-[rgba(255,255,255,0.86)] px-4 py-3 text-sm font-semibold tracking-[0.18em] text-[var(--foreground)] uppercase shadow-[0_16px_34px_rgba(17,32,51,0.12)]">
+                  Confirm
+                </div>
+
+                <div className="absolute left-[30%] top-[34%] h-px w-[34%] rotate-[11deg] bg-[linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.1))]" />
+                <div className="absolute left-[46%] top-[58%] h-px w-[24%] -rotate-[22deg] bg-[linear-gradient(90deg,rgba(17,32,51,0.16),rgba(17,32,51,0.02))]" />
+              </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-4">
-            <button
-              className="rounded-full bg-[var(--button)] px-6 py-3 text-base font-semibold text-white transition hover:bg-[var(--button-hover)]"
-              onClick={() => signIn("google")}
-              type="button"
-            >
-              Continue with Google
-            </button>
-          </div>
-          {!googleConfigured ? (
-            <div className="rounded-[1.75rem] border border-[rgba(174,69,52,0.18)] bg-[rgba(174,69,52,0.08)] p-5 text-sm leading-7 text-[var(--foreground)]">
-              Add the Google auth values from <code>.env.example</code> before sign-in
-              will work locally or on Vercel.
-            </div>
-          ) : null}
         </section>
       </main>
     );
