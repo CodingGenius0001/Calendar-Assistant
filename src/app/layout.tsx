@@ -14,7 +14,7 @@ const displayFont = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
-  title: "Calender Assistant",
+  title: "Calendar Assistant",
   description:
     "Speech-first Google Calendar organizer with intent confirmation and priority-aware scheduling.",
 };

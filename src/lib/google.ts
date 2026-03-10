@@ -31,10 +31,10 @@ function buildEventDescription(notes: string) {
   const cleanedNotes = notes.trim();
 
   if (!cleanedNotes) {
-    return "Scheduled by Calender Assistant.";
+    return "Scheduled by Calendar Assistant.";
   }
 
-  return `Scheduled by Calender Assistant.\n\nAgenda notes:\n${cleanedNotes}`;
+  return `Scheduled by Calendar Assistant.\n\nAgenda notes:\n${cleanedNotes}`;
 }
 
 export async function listUpcomingEvents(accessToken: string): Promise<UpcomingEvent[]> {

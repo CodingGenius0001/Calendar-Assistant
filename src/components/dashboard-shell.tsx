@@ -52,7 +52,7 @@ type DashboardShellProps = {
   upcomingEvents: UpcomingEvent[];
 };
 
-const DRAFT_STORAGE_KEY = "calender-assistant-draft";
+const DRAFT_STORAGE_KEY = "calendar-assistant-draft";
 
 const PRIORITY_COPY: Array<{
   description: string;
@@ -403,7 +403,7 @@ export function DashboardShell({
                 </div>
                 <div className="space-y-4">
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
-                    Calender Assistant
+                    Calendar Assistant
                   </p>
                   <h1 className="display-font max-w-3xl text-5xl leading-none font-semibold tracking-tight md:text-7xl">
                     Speak the plan.
@@ -428,14 +428,6 @@ export function DashboardShell({
                 >
                   Continue with Google
                 </button>
-                <a
-                  className="rounded-full border border-[rgba(17,32,51,0.12)] px-6 py-3 text-base font-semibold transition hover:bg-[rgba(17,32,51,0.04)]"
-                  href="https://vercel.com/new"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Deploy on Vercel
-                </a>
               </div>
               {!googleConfigured ? (
                 <div className="rounded-[1.75rem] border border-[rgba(174,69,52,0.18)] bg-[rgba(174,69,52,0.08)] p-5 text-sm leading-7 text-[var(--foreground)]">

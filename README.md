@@ -1,4 +1,4 @@
-# Calender Assistant
+# Calendar Assistant
 
 Speech-first Google Calendar organizer built with Next.js and designed for Vercel deployment.
 
