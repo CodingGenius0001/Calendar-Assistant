@@ -1,0 +1,219 @@
+import { addDays, addMinutes } from "date-fns";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+
+type EventPriority = "high" | "medium" | "low";
+type PreferredWindow = "any" | "morning" | "afternoon" | "evening";
+
+type BusyBlock = {
+  end: Date;
+  start: Date;
+};
+
+type ScheduleInput = {
+  durationMinutes: number;
+  now: Date;
+  preferredWindow: PreferredWindow;
+  priority: EventPriority;
+  timeZone: string;
+};
+
+type ScheduledSlot = {
+  bucket: "today" | "tomorrow" | "later";
+  end: Date;
+  rationale: string;
+  start: Date;
+};
+
+type WindowDefinition = {
+  endHour: number;
+  label: string;
+  startHour: number;
+};
+
+const PRIORITY_RULES: Record<
+  EventPriority,
+  {
+    idealLabel: string;
+    offsets: number[];
+    summary: string;
+  }
+> = {
+  high: {
+    idealLabel: "today",
+    offsets: [0, 1],
+    summary: "High priority checks today first, then falls back to the next open slot.",
+  },
+  low: {
+    idealLabel: "later this week",
+    offsets: [2, 3, 4, 5, 6, 7],
+    summary: "Low priority intentionally pushes into later dates before using near-term time.",
+  },
+  medium: {
+    idealLabel: "tomorrow",
+    offsets: [1, 2, 3],
+    summary: "Medium priority starts with tomorrow and then searches the next few days.",
+  },
+};
+
+const WINDOW_RULES: Record<PreferredWindow, WindowDefinition[]> = {
+  any: [{ endHour: 18, label: "the workday", startHour: 9 }],
+  afternoon: [
+    { endHour: 17, label: "the afternoon", startHour: 12 },
+    { endHour: 12, label: "the morning", startHour: 8 },
+    { endHour: 20, label: "the evening", startHour: 17 },
+  ],
+  evening: [
+    { endHour: 20, label: "the evening", startHour: 17 },
+    { endHour: 17, label: "the afternoon", startHour: 12 },
+  ],
+  morning: [
+    { endHour: 12, label: "the morning", startHour: 8 },
+    { endHour: 18, label: "later in the day", startHour: 12 },
+  ],
+};
+
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function buildZonedDate(dateKey: string, hour: number, minute: number, timeZone: string) {
+  return fromZonedTime(
+    `${dateKey}T${pad(hour)}:${pad(minute)}:00`,
+    timeZone,
+  );
+}
+
+function getLocalDateKey(date: Date, timeZone: string) {
+  return formatInTimeZone(date, timeZone, "yyyy-MM-dd");
+}
+
+function roundUpToQuarterHour(date: Date) {
+  const quarterHour = 15 * 60 * 1000;
+  return new Date(Math.ceil(date.getTime() / quarterHour) * quarterHour);
+}
+
+function overlapsBusyBlock(start: Date, end: Date, busyBlocks: BusyBlock[]) {
+  return busyBlocks.some(
+    (busyBlock) => start < busyBlock.end && end > busyBlock.start,
+  );
+}
+
+function describeBucket(dayOffset: number): "today" | "tomorrow" | "later" {
+  if (dayOffset <= 0) {
+    return "today";
+  }
+
+  if (dayOffset === 1) {
+    return "tomorrow";
+  }
+
+  return "later";
+}
+
+function buildRationale(
+  priority: EventPriority,
+  dayOffset: number,
+  preferredWindow: PreferredWindow,
+  matchedWindow: WindowDefinition,
+) {
+  const priorityRule = PRIORITY_RULES[priority];
+  const bucket = describeBucket(dayOffset);
+
+  const placementLine =
+    priority === "high" && dayOffset > 0
+      ? "No same-day opening fit, so I used the next earliest spot."
+      : priority === "medium" && bucket !== "tomorrow"
+        ? "Tomorrow was packed, so I shifted to the next available day."
+        : priority === "low" && bucket !== "later"
+          ? "A later-week slot was not available, so I used the earliest fallback."
+          : `This lands in ${priorityRule.idealLabel}, which matches the ${priority} priority rule.`;
+
+  const windowLine =
+    preferredWindow === "any"
+      ? `It fits cleanly inside ${matchedWindow.label}.`
+      : matchedWindow.label === preferredWindow
+        ? `It stays inside your preferred ${preferredWindow} window.`
+        : `Your preferred ${preferredWindow} window was full, so I used ${matchedWindow.label}.`;
+
+  return `${priorityRule.summary} ${placementLine} ${windowLine}`;
+}
+
+export function buildSearchRange(input: Pick<ScheduleInput, "now" | "priority" | "timeZone">) {
+  const offsets = PRIORITY_RULES[input.priority].offsets;
+  const anchorDay = getLocalDateKey(input.now, input.timeZone);
+  const anchorNoon = buildZonedDate(anchorDay, 12, 0, input.timeZone);
+  const firstDate = getLocalDateKey(
+    addDays(anchorNoon, offsets[0]),
+    input.timeZone,
+  );
+  const lastDate = getLocalDateKey(
+    addDays(anchorNoon, offsets[offsets.length - 1]),
+    input.timeZone,
+  );
+
+  return {
+    timeMax: buildZonedDate(lastDate, 23, 59, input.timeZone),
+    timeMin: buildZonedDate(firstDate, 0, 0, input.timeZone),
+  };
+}
+
+export function findAvailableSlot(
+  input: ScheduleInput,
+  busyBlocks: BusyBlock[],
+): ScheduledSlot | null {
+  const priorityRule = PRIORITY_RULES[input.priority];
+  const todayLocalKey = getLocalDateKey(input.now, input.timeZone);
+  const anchorNoon = buildZonedDate(todayLocalKey, 12, 0, input.timeZone);
+  const busyBlocksSorted = [...busyBlocks].sort(
+    (left, right) => left.start.getTime() - right.start.getTime(),
+  );
+
+  for (const dayOffset of priorityRule.offsets) {
+    const dateKey = getLocalDateKey(addDays(anchorNoon, dayOffset), input.timeZone);
+    const windows = WINDOW_RULES[input.preferredWindow];
+
+    for (const matchedWindow of windows) {
+      const windowStart = buildZonedDate(
+        dateKey,
+        matchedWindow.startHour,
+        0,
+        input.timeZone,
+      );
+      const windowEnd = buildZonedDate(
+        dateKey,
+        matchedWindow.endHour,
+        0,
+        input.timeZone,
+      );
+
+      let cursor = roundUpToQuarterHour(windowStart);
+      if (dayOffset === 0 && cursor < input.now) {
+        cursor = roundUpToQuarterHour(input.now);
+      }
+
+      while (addMinutes(cursor, input.durationMinutes) <= windowEnd) {
+        const slotEnd = addMinutes(cursor, input.durationMinutes);
+
+        if (!overlapsBusyBlock(cursor, slotEnd, busyBlocksSorted)) {
+          return {
+            bucket: describeBucket(dayOffset),
+            end: slotEnd,
+            rationale: buildRationale(
+              input.priority,
+              dayOffset,
+              input.preferredWindow,
+              matchedWindow,
+            ),
+            start: cursor,
+          };
+        }
+
+        cursor = addMinutes(cursor, 15);
+      }
+    }
+  }
+
+  return null;
+}
+
+export type { BusyBlock, EventPriority, PreferredWindow, ScheduledSlot };

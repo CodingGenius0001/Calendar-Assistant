@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4ecdf;
+  --foreground: #112033;
+  --muted: #546274;
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --surface-accent: rgba(21, 93, 82, 0.12);
+  --border: rgba(17, 32, 51, 0.12);
+  --shadow: 0 24px 80px rgba(17, 32, 51, 0.12);
+  --button: #155d52;
+  --button-hover: #0f4b42;
+  --signal: #d88c41;
+  --danger: #ae4534;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(216, 140, 65, 0.24), transparent 34%),
+    radial-gradient(circle at top right, rgba(21, 93, 82, 0.2), transparent 28%),
+    linear-gradient(180deg, #f7f0e6 0%, #f1e6d4 100%);
+  color: var(--foreground);
+  font-family: var(--font-body), sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(21, 93, 82, 0.18);
+}
+
+.glass-panel {
+  background: var(--surface);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.display-font {
+  font-family: var(--font-display), serif;
+}
+
+.field-shell {
+  border: 1px solid rgba(17, 32, 51, 0.1);
+  background: rgba(255, 255, 255, 0.84);
+  transition:
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.field-shell:focus-within {
+  border-color: rgba(21, 93, 82, 0.5);
+  box-shadow: 0 0 0 4px rgba(21, 93, 82, 0.12);
+}
+
+.soft-grid {
+  background-image:
+    linear-gradient(rgba(17, 32, 51, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17, 32, 51, 0.04) 1px, transparent 1px);
+  background-position: center;
+  background-size: 28px 28px;
+}
+
+@media (max-width: 768px) {
+  body {
+    background:
+      radial-gradient(circle at top left, rgba(216, 140, 65, 0.18), transparent 32%),
+      radial-gradient(circle at top right, rgba(21, 93, 82, 0.16), transparent 24%),
+      linear-gradient(180deg, #f8f0e8 0%, #f2e7d6 100%);
+  }
+}
