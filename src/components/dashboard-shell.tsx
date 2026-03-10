@@ -67,7 +67,7 @@ function createEmptyTiming(): PromptTiming {
 function createInitialDraft(timeZone: string): DraftState {
   return {
     attendeeEmails: [],
-    durationMinutes: 45,
+    durationMinutes: 30,
     notes: "",
     preferredWindow: "any",
     priority: "medium",

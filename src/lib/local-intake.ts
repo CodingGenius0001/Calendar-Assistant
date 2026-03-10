@@ -61,7 +61,7 @@ const INTENT_SYSTEM_PROMPT = [
   "Infer the most likely scheduling task from the transcript.",
   "Use conservative defaults when details are missing.",
   "priority defaults to medium.",
-  "durationMinutes defaults to 45.",
+  "durationMinutes defaults to 30.",
   "preferredWindow defaults to any.",
   "requestedDateLabel should briefly describe the user's implied timing, like today, tomorrow, later this week, or the closest exact phrase from the user.",
   "If the request is too ambiguous to trust, set needsClarification to true and confidence to low.",
@@ -143,7 +143,7 @@ function inferDurationMinutes(transcript: string) {
     }
   }
 
-  return 45;
+  return 30;
 }
 
 function inferTitle(transcript: string) {
