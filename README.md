@@ -64,9 +64,11 @@ npm run dev
 
 1. Import the project into Vercel.
 2. Add the same environment variables in Vercel project settings.
-3. Set `NEXTAUTH_URL` to your deployed domain, for example `https://your-app.vercel.app`.
+3. Keep `NEXTAUTH_URL=http://localhost:3000` locally. On Vercel, you can usually leave `NEXTAUTH_URL` unset and let NextAuth detect the deployment URL from Vercel.
 4. Add the matching production Google OAuth redirect URI.
 5. Deploy.
+
+For the exact Vercel + Google Cloud walkthrough, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ## GitHub and repo safety
 
