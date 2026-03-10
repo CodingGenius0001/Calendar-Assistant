@@ -60,19 +60,27 @@ const INTENT_SYSTEM_PROMPT = [
   "Return only valid JSON matching the provided schema.",
 ].join(" ");
 
-function formatProgress(prefix: string, progress: ProgressEvent) {
-  let progressPercent = "";
-
-  if (typeof progress.progress === "number" && Number.isFinite(progress.progress)) {
-    if (progress.progress >= 0 && progress.progress <= 1) {
-      progressPercent = ` ${Math.round(progress.progress * 100)}%`;
-    } else if (progress.progress > 1 && progress.progress <= 100) {
-      progressPercent = ` ${Math.round(progress.progress)}%`;
-    }
+function formatProgressPercent(progressValue?: number) {
+  if (typeof progressValue !== "number" || !Number.isFinite(progressValue)) {
+    return "";
   }
 
-  const detail = progress.text ?? progress.status ?? progress.file ?? "loading";
-  return `${prefix}: ${detail}${progressPercent}`;
+  if (progressValue >= 0 && progressValue <= 1) {
+    return ` ${Math.round(progressValue * 100)}%`;
+  }
+
+  if (progressValue > 1 && progressValue <= 100) {
+    return ` ${Math.round(progressValue)}%`;
+  }
+
+  return "";
+}
+
+function formatModelLoadingStatus(label: string, progress: ProgressEvent) {
+  const percent = formatProgressPercent(progress.progress);
+  return percent
+    ? `Downloading ${label}...${percent}`
+    : `Preparing ${label}...`;
 }
 
 function normalizeTranscript(transcript: string) {
@@ -287,7 +295,7 @@ async function getTranscriber(onStatus?: StatusCallback) {
       return pipeline("automatic-speech-recognition", SPEECH_MODEL_ID, {
         device: isWebGpuAvailable() ? "webgpu" : "wasm",
         progress_callback: (progress: ProgressEvent) => {
-          onStatus?.(formatProgress("Speech model", progress));
+          onStatus?.(formatModelLoadingStatus("speech model", progress));
         },
       });
     })().catch((error) => {
@@ -312,7 +320,7 @@ async function getIntentEngine(onStatus?: StatusCallback) {
 
       return CreateMLCEngine(INTENT_MODEL_ID, {
         initProgressCallback: (report: ProgressEvent) => {
-          onStatus?.(formatProgress("Intent model", report));
+          onStatus?.(formatModelLoadingStatus("understanding model", report));
         },
       });
     })().catch((error) => {
@@ -332,7 +340,7 @@ export async function transcribeAudioLocally(
   const blobUrl = URL.createObjectURL(audioFile);
 
   try {
-    onStatus?.("Transcribing the recording...");
+    onStatus?.("Transcribing your recording...");
     const output = await transcriber(blobUrl, {
       chunk_length_s: 20,
       stride_length_s: 5,
@@ -366,7 +374,7 @@ export async function interpretTranscriptLocally(
   try {
     const engine = await getIntentEngine(onStatus);
 
-    onStatus?.("Inferring the calendar intent...");
+    onStatus?.("Understanding your request...");
 
     const response = await engine.chat.completions.create({
       frequency_penalty: 0,
@@ -393,7 +401,7 @@ export async function interpretTranscriptLocally(
       transcript: normalizedTranscript,
     };
   } catch {
-    onStatus?.("Using the built-in fallback parser...");
+    onStatus?.("Switching to the built-in fallback parser...");
 
     return {
       engine: "rules-fallback",
