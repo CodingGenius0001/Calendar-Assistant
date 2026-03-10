@@ -35,16 +35,20 @@ type DraftState = {
 
 type FlowStep = "record" | "review" | "recommend";
 
+type SlotChoice = {
+  bucket: "today" | "tomorrow" | "later";
+  end: string;
+  start: string;
+  timeZone: string;
+};
+
 type ScheduleResult = {
+  alternativeSlots?: SlotChoice[];
   eventLink?: string | null;
-  matchType: "requested" | "adjusted" | "recommended";
+  matchType: "requested" | "adjusted" | "recommended" | "selected";
+  meetLink?: string | null;
   rationale: string;
-  slot: {
-    bucket: "today" | "tomorrow" | "later";
-    end: string;
-    start: string;
-    timeZone: string;
-  };
+  slot: SlotChoice;
   status: "previewed" | "booked";
   title: string;
 };
@@ -86,6 +90,14 @@ function formatSlotTime(dateIsoString: string, timeZone: string) {
     month: "short",
     timeZone,
     weekday: "short",
+  }).format(new Date(dateIsoString));
+}
+
+function formatClockTime(dateIsoString: string, timeZone: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
   }).format(new Date(dateIsoString));
 }
 
@@ -159,6 +171,8 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
   const [manualPrompt, setManualPrompt] = useState("");
   const [requestError, setRequestError] = useState<string | null>(null);
   const [result, setResult] = useState<ScheduleResult | null>(null);
+  const [selectedSlotStart, setSelectedSlotStart] = useState<string | null>(null);
+  const [showMoreTimes, setShowMoreTimes] = useState(false);
 
   useEffect(() => {
     const detectedTimeZone =
@@ -178,6 +192,8 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
     setManualPrompt("");
     setRequestError(null);
     setResult(null);
+    setSelectedSlotStart(null);
+    setShowMoreTimes(false);
     setStep("record");
   }
 
@@ -190,6 +206,8 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
     setIntakeStatus(null);
     setRequestError(null);
     setResult(null);
+    setSelectedSlotStart(null);
+    setShowMoreTimes(false);
 
     try {
       let transcript = "";
@@ -274,6 +292,7 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
           priority: activeDraft.priority,
           promptTiming: activeDraft.promptTiming,
           reminderMinutes: activeDraft.reminderMinutes,
+          selectedSlotStartIso: mode === "book" ? selectedSlotStart : null,
           timeZone: activeDraft.timeZone,
           title: activeDraft.title,
         }),
@@ -296,8 +315,14 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
       }
 
       setResult(payload);
+      setSelectedSlotStart(payload.slot.start);
+
+      if (mode === "preview") {
+        setShowMoreTimes(false);
+      }
 
       if (mode === "book") {
+        setShowMoreTimes(false);
         startTransition(() => {
           router.refresh();
         });
@@ -332,9 +357,21 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
     };
 
     setDraft(nextDraft);
+    setSelectedSlotStart(null);
+    setShowMoreTimes(false);
     setStep("recommend");
     await handleSchedule("preview", nextDraft);
   }
+
+  const selectedPreviewSlot =
+    result?.status === "previewed"
+      ? [result.slot, ...(result.alternativeSlots ?? [])].find(
+          (slot) => slot.start === selectedSlotStart,
+        ) ?? result.slot
+      : result?.slot ?? null;
+  const hasCustomSelectedSlot =
+    result?.status === "previewed" &&
+    Boolean(selectedPreviewSlot && selectedPreviewSlot.start !== result.slot.start);
 
   if (!session) {
     return (
@@ -599,6 +636,19 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                 </div>
               </div>
 
+              <div className="rounded-[1.5rem] border border-[rgba(17,32,51,0.08)] bg-[rgba(17,32,51,0.03)] p-5">
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                  Tips for better prompts
+                </p>
+                <ul className="mt-4 space-y-2 text-sm leading-6 text-[var(--foreground)]">
+                  <li>Include the day and time if you already know when you want it.</li>
+                  <li>Say the meeting length, like 30 minutes or 2 hours.</li>
+                  <li>Include invitee email addresses if anyone should be added.</li>
+                  <li>Say how early you want reminders, like 45 and 15 minutes before.</li>
+                  <li>If the title matters, say it directly or put it in quotes.</li>
+                </ul>
+              </div>
+
               <div className="field-shell rounded-[1.5rem] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
@@ -665,10 +715,15 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                 <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
                   Step 3 of 3
                 </p>
-                <h2 className="text-3xl font-semibold">Confirm the recommendation</h2>
+                <h2 className="text-3xl font-semibold">
+                  {result?.status === "booked"
+                    ? "Calendar booked"
+                    : "Confirm the recommendation"}
+                </h2>
                 <p className="text-base leading-7 text-[var(--muted)]">
-                  Review the proposed slot, then book it into Google Calendar if it looks
-                  right.
+                  {result?.status === "booked"
+                    ? "Your event is now on the calendar. Review the final details below."
+                    : "Review the proposed slot, then book it into Google Calendar if it looks right."}
                 </p>
               </div>
 
@@ -680,64 +735,169 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
 
               {result ? (
                 <div className="space-y-4">
-                  <div className="rounded-[1.5rem] border border-[var(--border)] bg-[rgba(255,255,255,0.86)] p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-                      {result.matchType === "requested"
-                        ? "Requested slot"
-                        : result.matchType === "adjusted"
-                          ? "Adjusted recommendation"
-                          : draft.promptTiming.mode === "flexible"
-                        ? "Recommended slot"
-                        : "Requested slot"}
-                    </p>
-                    <h3 className="mt-2 text-3xl font-semibold">{result.title}</h3>
-                    <p className="mt-3 text-base leading-7 text-[var(--foreground)]">
-                      {formatSlotTime(result.slot.start, result.slot.timeZone)} to{" "}
-                      {formatSlotTime(result.slot.end, result.slot.timeZone)}
-                    </p>
-                    <span className="mt-4 inline-flex rounded-full bg-[var(--surface-accent)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--button)]">
-                      {result.slot.bucket}
-                    </span>
-                    <div className="mt-5 grid gap-2 text-sm leading-6 text-[var(--foreground)] md:grid-cols-2">
-                      <p>
-                        <span className="font-semibold">Duration:</span>{" "}
-                        {formatDurationSummary(draft.durationMinutes)}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Google Meet:</span> Included
-                      </p>
-                      <p>
-                        <span className="font-semibold">Attendees:</span>{" "}
-                        {draft.attendeeEmails.length > 0
-                          ? draft.attendeeEmails.join(", ")
-                          : "None added"}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Reminders:</span>{" "}
-                        {formatReminderSummary(draft.reminderMinutes)}
-                      </p>
-                    </div>
-                  </div>
+                  {result.status === "booked" ? (
+                    <div className="space-y-4">
+                      <div className="rounded-[1.5rem] border border-[rgba(21,93,82,0.16)] bg-[rgba(21,93,82,0.08)] p-5">
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--button)]">
+                          Booked in Calendar
+                        </p>
+                        <h3 className="mt-2 text-3xl font-semibold">{result.title}</h3>
+                        <p className="mt-3 text-base leading-7 text-[var(--foreground)]">
+                          {formatSlotTime(result.slot.start, result.slot.timeZone)} to{" "}
+                          {formatSlotTime(result.slot.end, result.slot.timeZone)}
+                        </p>
+                        <div className="mt-5 grid gap-2 text-sm leading-6 text-[var(--foreground)] md:grid-cols-2">
+                          <p>
+                            <span className="font-semibold">Duration:</span>{" "}
+                            {formatDurationSummary(draft.durationMinutes)}
+                          </p>
+                          <p>
+                            <span className="font-semibold">Google Meet:</span>{" "}
+                            {result.meetLink ? "Ready" : "Included in Google Calendar"}
+                          </p>
+                          <p>
+                            <span className="font-semibold">Attendees:</span>{" "}
+                            {draft.attendeeEmails.length > 0
+                              ? draft.attendeeEmails.join(", ")
+                              : "None added"}
+                          </p>
+                          <p>
+                            <span className="font-semibold">Reminders:</span>{" "}
+                            {formatReminderSummary(draft.reminderMinutes)}
+                          </p>
+                        </div>
+                      </div>
 
-                  <p className="rounded-[1.5rem] bg-[rgba(17,32,51,0.04)] p-5 text-sm leading-7 text-[var(--foreground)]">
-                    {result.rationale}
-                  </p>
-
-                  {draft.promptTiming.mode === "flexible" ? (
-                    <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
-                      Priority only came into play because your request did not include a
-                      specific day and time.
-                    </div>
-                  ) : result.matchType === "adjusted" ? (
-                    <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
-                      A specific time was detected, but that slot was not available, so I
-                      suggested the closest opening later that same day.
+                      <p className="rounded-[1.5rem] bg-[rgba(17,32,51,0.04)] p-5 text-sm leading-7 text-[var(--foreground)]">
+                        {result.rationale}
+                      </p>
                     </div>
                   ) : (
-                    <div className="rounded-[1.5rem] bg-[rgba(21,93,82,0.08)] p-4 text-sm leading-6 text-[var(--foreground)]">
-                      A specific time or day was detected, so priority was not used to pick
-                      this slot.
-                    </div>
+                    <>
+                      <div className="rounded-[1.5rem] border border-[var(--border)] bg-[rgba(255,255,255,0.86)] p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                              {result.matchType === "requested"
+                                ? "Requested slot"
+                                : result.matchType === "adjusted"
+                                  ? "Adjusted recommendation"
+                                  : draft.promptTiming.mode === "flexible"
+                                    ? "Recommended slot"
+                                    : "Requested slot"}
+                            </p>
+                            <h3 className="mt-2 text-3xl font-semibold">{result.title}</h3>
+                          </div>
+                          {result.alternativeSlots && result.alternativeSlots.length > 0 ? (
+                            <button
+                              className="rounded-full border border-[rgba(17,32,51,0.12)] px-4 py-2 text-sm font-semibold transition hover:bg-[rgba(17,32,51,0.04)]"
+                              onClick={() => setShowMoreTimes((current) => !current)}
+                              type="button"
+                            >
+                              {showMoreTimes ? "Hide more times" : "More available times"}
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <p className="mt-3 text-base leading-7 text-[var(--foreground)]">
+                          {formatSlotTime(result.slot.start, result.slot.timeZone)} to{" "}
+                          {formatSlotTime(result.slot.end, result.slot.timeZone)}
+                        </p>
+                        <span className="mt-4 inline-flex rounded-full bg-[var(--surface-accent)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--button)]">
+                          {result.slot.bucket}
+                        </span>
+                        <div className="mt-5 grid gap-2 text-sm leading-6 text-[var(--foreground)] md:grid-cols-2">
+                          <p>
+                            <span className="font-semibold">Duration:</span>{" "}
+                            {formatDurationSummary(draft.durationMinutes)}
+                          </p>
+                          <p>
+                            <span className="font-semibold">Google Meet:</span> Included
+                          </p>
+                          <p>
+                            <span className="font-semibold">Attendees:</span>{" "}
+                            {draft.attendeeEmails.length > 0
+                              ? draft.attendeeEmails.join(", ")
+                              : "None added"}
+                          </p>
+                          <p>
+                            <span className="font-semibold">Reminders:</span>{" "}
+                            {formatReminderSummary(draft.reminderMinutes)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <p className="rounded-[1.5rem] bg-[rgba(17,32,51,0.04)] p-5 text-sm leading-7 text-[var(--foreground)]">
+                        {result.rationale}
+                      </p>
+
+                      {showMoreTimes && result.alternativeSlots && result.alternativeSlots.length > 0 ? (
+                        <div className="rounded-[1.5rem] border border-[rgba(17,32,51,0.08)] bg-[rgba(255,255,255,0.78)] p-5">
+                          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                            More open times
+                          </p>
+                          <div className="mt-4 flex flex-wrap gap-3">
+                            {result.alternativeSlots.map((slot) => {
+                              const selected = slot.start === selectedSlotStart;
+
+                              return (
+                                <button
+                                  key={slot.start}
+                                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                                    selected
+                                      ? "bg-[var(--button)] text-white"
+                                      : "border border-[rgba(17,32,51,0.12)] bg-white text-[var(--foreground)] hover:bg-[rgba(17,32,51,0.04)]"
+                                  }`}
+                                  onClick={() => setSelectedSlotStart(slot.start)}
+                                  type="button"
+                                >
+                                  {formatClockTime(slot.start, slot.timeZone)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {hasCustomSelectedSlot && selectedPreviewSlot ? (
+                        <div className="rounded-[1.5rem] border border-[rgba(21,93,82,0.16)] bg-[rgba(21,93,82,0.08)] p-5">
+                          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--button)]">
+                            Your chosen slot
+                          </p>
+                          <p className="mt-3 text-base leading-7 text-[var(--foreground)]">
+                            {formatSlotTime(
+                              selectedPreviewSlot.start,
+                              selectedPreviewSlot.timeZone,
+                            )}{" "}
+                            to{" "}
+                            {formatSlotTime(
+                              selectedPreviewSlot.end,
+                              selectedPreviewSlot.timeZone,
+                            )}
+                          </p>
+                          <p className="mt-3 text-sm leading-6 text-[var(--foreground)]">
+                            This is the time that will be booked if you continue.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {draft.promptTiming.mode === "flexible" ? (
+                        <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
+                          Priority only came into play because your request did not include a
+                          specific day and time.
+                        </div>
+                      ) : result.matchType === "adjusted" ? (
+                        <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
+                          A specific time was detected, but that slot was not available, so I
+                          suggested the closest opening later that same day.
+                        </div>
+                      ) : (
+                        <div className="rounded-[1.5rem] bg-[rgba(21,93,82,0.08)] p-4 text-sm leading-6 text-[var(--foreground)]">
+                          A specific time or day was detected, so priority was not used to pick
+                          this slot.
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               ) : null}
@@ -756,7 +916,11 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                     onClick={() => handleSchedule("book")}
                     type="button"
                   >
-                    {isSubmitting ? "Booking..." : "Book this slot"}
+                    {isSubmitting
+                      ? "Booking..."
+                      : hasCustomSelectedSlot
+                        ? "Book selected slot"
+                        : "Book this slot"}
                   </button>
                 ) : null}
                 {result?.status === "booked" && result.eventLink ? (
@@ -767,6 +931,16 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                     target="_blank"
                   >
                     Open in Google Calendar
+                  </a>
+                ) : null}
+                {result?.status === "booked" && result.meetLink ? (
+                  <a
+                    className="rounded-full border border-[rgba(17,32,51,0.12)] px-5 py-3 text-sm font-semibold transition hover:bg-[rgba(17,32,51,0.04)]"
+                    href={result.meetLink}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open Google Meet
                   </a>
                 ) : null}
                 <button

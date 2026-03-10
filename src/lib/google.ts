@@ -134,6 +134,7 @@ export async function createCalendarEvent(
   return {
     htmlLink: response.data.htmlLink ?? null,
     id: response.data.id ?? crypto.randomUUID(),
+    meetLink: response.data.hangoutLink ?? null,
   };
 }
 

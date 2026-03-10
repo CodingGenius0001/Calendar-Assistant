@@ -24,8 +24,14 @@ type ScheduleInput = {
 type ScheduledSlot = {
   bucket: "today" | "tomorrow" | "later";
   end: Date;
-  matchType: "requested" | "adjusted" | "recommended";
+  matchType: "requested" | "adjusted" | "recommended" | "selected";
   rationale: string;
+  start: Date;
+};
+
+type SlotOption = {
+  bucket: "today" | "tomorrow" | "later";
+  end: Date;
   start: Date;
 };
 
@@ -105,6 +111,21 @@ function overlapsBusyBlock(start: Date, end: Date, busyBlocks: BusyBlock[]) {
   return busyBlocks.some(
     (busyBlock) => start < busyBlock.end && end > busyBlock.start,
   );
+}
+
+function isSlotAvailable(
+  start: Date,
+  durationMinutes: number,
+  now: Date,
+  busyBlocks: BusyBlock[],
+) {
+  const end = addMinutes(start, durationMinutes);
+
+  if (start < now) {
+    return false;
+  }
+
+  return !overlapsBusyBlock(start, end, busyBlocks);
 }
 
 function getDayOffsetFromDateKey(dateKey: string, now: Date, timeZone: string) {
@@ -242,6 +263,80 @@ export function buildRequestedDaySearchRange(requestedDateKey: string, timeZone:
   };
 }
 
+export function buildSelectedSlot(
+  input: Pick<ScheduleInput, "durationMinutes" | "now" | "timeZone"> & {
+    requestedStart?: Date | null;
+    selectedStart: Date;
+  },
+  busyBlocks: BusyBlock[],
+): ScheduledSlot | null {
+  if (
+    !isSlotAvailable(
+      input.selectedStart,
+      input.durationMinutes,
+      input.now,
+      busyBlocks,
+    )
+  ) {
+    return null;
+  }
+
+  const selectedDateKey = getLocalDateKey(input.selectedStart, input.timeZone);
+  const dayOffset = getDayOffsetFromDateKey(
+    selectedDateKey,
+    input.now,
+    input.timeZone,
+  );
+  const pickedRequestedTime =
+    input.requestedStart &&
+    input.requestedStart.getTime() === input.selectedStart.getTime();
+
+  return {
+    bucket: describeBucket(dayOffset),
+    end: addMinutes(input.selectedStart, input.durationMinutes),
+    matchType: pickedRequestedTime ? "requested" : "selected",
+    rationale: pickedRequestedTime
+      ? "This matches the time you chose."
+      : `You picked another open time at ${formatClockTime(input.selectedStart, input.timeZone)}.`,
+    start: input.selectedStart,
+  };
+}
+
+export function findAlternativeSlots(
+  input: Pick<ScheduleInput, "durationMinutes" | "now" | "timeZone">,
+  busyBlocks: BusyBlock[],
+  dateKey: string,
+  startAfter: Date,
+  limit = 4,
+): SlotOption[] {
+  const results: SlotOption[] = [];
+  const busyBlocksSorted = [...busyBlocks].sort(
+    (left, right) => left.start.getTime() - right.start.getTime(),
+  );
+  const sameDayEnd = buildZonedDate(dateKey, 23, 59, input.timeZone);
+  const dayOffset = getDayOffsetFromDateKey(dateKey, input.now, input.timeZone);
+  let cursor = roundUpToQuarterHour(startAfter);
+
+  while (
+    results.length < limit &&
+    addMinutes(cursor, input.durationMinutes) <= sameDayEnd
+  ) {
+    const end = addMinutes(cursor, input.durationMinutes);
+
+    if (!overlapsBusyBlock(cursor, end, busyBlocksSorted)) {
+      results.push({
+        bucket: describeBucket(dayOffset),
+        end,
+        start: cursor,
+      });
+    }
+
+    cursor = addMinutes(cursor, 15);
+  }
+
+  return results;
+}
+
 export function findAvailableSlot(
   input: ScheduleInput,
   busyBlocks: BusyBlock[],
@@ -340,4 +435,12 @@ export function findAvailableSlot(
   return null;
 }
 
-export type { BusyBlock, EventPriority, PreferredWindow, ScheduledSlot, TimingMode };
+export { getLocalDateKey };
+export type {
+  BusyBlock,
+  EventPriority,
+  PreferredWindow,
+  ScheduledSlot,
+  SlotOption,
+  TimingMode,
+};
