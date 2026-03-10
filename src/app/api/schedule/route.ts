@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { createCalendarEvent, listBusyBlocks } from "@/lib/google";
+import { toDisplayTitle } from "@/lib/prompt-details";
 import {
   buildExactSearchRange,
   buildRequestedDaySearchRange,
@@ -34,7 +35,7 @@ function inferTitle(title: string, notes: string) {
   const cleanedTitle = title.trim();
 
   if (cleanedTitle) {
-    return cleanedTitle;
+    return toDisplayTitle(cleanedTitle);
   }
 
   const cleanedNotes = notes
@@ -44,7 +45,9 @@ function inferTitle(title: string, notes: string) {
     .slice(0, 6)
     .join(" ");
 
-  return cleanedNotes ? `${cleanedNotes}${cleanedNotes.length >= 32 ? "..." : ""}` : "New agenda item";
+  return cleanedNotes
+    ? toDisplayTitle(`${cleanedNotes}${cleanedNotes.length >= 32 ? "..." : ""}`)
+    : "New Agenda Item";
 }
 
 export async function POST(request: Request) {

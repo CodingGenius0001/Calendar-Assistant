@@ -8,6 +8,7 @@ import {
 import {
   extractPromptDetails,
   normalizePromptText,
+  toDisplayTitle,
   type PromptTiming,
 } from "@/lib/prompt-details";
 
@@ -140,29 +141,44 @@ function inferTitle(transcript: string) {
     .find(Boolean);
 
   const candidate = (firstClause ?? cleaned).split(" ").slice(0, 7).join(" ");
-  return candidate.length > 120 ? candidate.slice(0, 117).trimEnd() : candidate;
+  const trimmedCandidate =
+    candidate.length > 120 ? candidate.slice(0, 117).trimEnd() : candidate;
+  return toDisplayTitle(trimmedCandidate);
+}
+
+function formatDurationLabel(durationMinutes: number) {
+  if (durationMinutes % 60 === 0) {
+    const hours = durationMinutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+
+  return `${durationMinutes} minutes`;
 }
 
 function buildConfirmationMessage(intent: CalendarIntent, timing: PromptTiming) {
   if (timing.mode === "exact") {
-    return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes at ${timing.requestedDateLabel}.`;
+    return `I understood this as "${intent.title}" for ${formatDurationLabel(intent.durationMinutes)}, scheduled for ${timing.requestedDateLabel}.`;
   }
 
   if (timing.mode === "day") {
-    return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes on ${timing.requestedDateLabel}.`;
+    return `I understood this as "${intent.title}" for ${formatDurationLabel(intent.durationMinutes)} on ${timing.requestedDateLabel}.`;
   }
 
-  return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes, with ${intent.priority} priority${intent.preferredWindow === "any" ? "" : ` in the ${intent.preferredWindow}`}.`;
+  return `I understood this as "${intent.title}" for ${formatDurationLabel(intent.durationMinutes)}, with ${intent.priority} priority${intent.preferredWindow === "any" ? "" : ` in the ${intent.preferredWindow}`}.`;
 }
 
 function finalizeIntent(
   intent: CalendarIntent,
   details: ReturnType<typeof extractPromptDetails>,
 ): CalendarIntent {
-  const title = intent.title.trim() || details.suggestedTitle || inferTitle(intent.notes);
+  const title = toDisplayTitle(
+    intent.title.trim() || details.suggestedTitle || inferTitle(intent.notes),
+  );
+  const durationMinutes = details.explicitDurationMinutes ?? intent.durationMinutes;
 
   return {
     ...intent,
+    durationMinutes,
     preferredWindow: details.preferredWindow,
     priority: details.priority,
     requestedDateLabel: details.timing.requestedDateLabel,
@@ -170,6 +186,7 @@ function finalizeIntent(
     userConfirmationMessage: buildConfirmationMessage(
       {
         ...intent,
+        durationMinutes,
         preferredWindow: details.preferredWindow,
         priority: details.priority,
         requestedDateLabel: details.timing.requestedDateLabel,
@@ -185,8 +202,9 @@ function buildFallbackIntent(
   details: ReturnType<typeof extractPromptDetails>,
 ): CalendarIntent {
   const notes = normalizePromptText(transcript);
-  const durationMinutes = inferDurationMinutes(notes);
-  const title = details.suggestedTitle || inferTitle(notes);
+  const durationMinutes =
+    details.explicitDurationMinutes ?? inferDurationMinutes(notes);
+  const title = toDisplayTitle(details.suggestedTitle || inferTitle(notes));
   const needsClarification = notes.split(" ").length < 4;
   const confidence = needsClarification ? "low" : "medium";
 

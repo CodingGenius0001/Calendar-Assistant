@@ -13,6 +13,7 @@ type PromptTiming = {
 };
 
 type PromptDetails = {
+  explicitDurationMinutes: number | null;
   preferredWindow: PreferredWindow;
   priority: EventPriority;
   suggestedTitle: string | null;
@@ -41,6 +42,25 @@ function pad(value: number) {
 
 function normalizePromptText(prompt: string) {
   return prompt.replace(/\s+/g, " ").trim();
+}
+
+function toDisplayTitle(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const loweredWord = word.toLowerCase();
+
+      if (["a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "with"].includes(loweredWord)) {
+        return loweredWord;
+      }
+
+      return loweredWord.charAt(0).toUpperCase() + loweredWord.slice(1);
+    })
+    .join(" ")
+    .replace(/\b(a|an|and|at|for|in|of|on|or|the|to|with)\b/, (word) =>
+      word.charAt(0).toUpperCase() + word.slice(1),
+    );
 }
 
 function buildZonedDate(dateKey: string, hour: number, minute: number, timeZone: string) {
@@ -80,7 +100,7 @@ function extractQuotedTitle(prompt: string) {
   const quotedMatch = prompt.match(/"([^"]{1,120})"/);
 
   if (quotedMatch?.[1]) {
-    return quotedMatch[1].trim();
+    return toDisplayTitle(quotedMatch[1].trim());
   }
 
   const namedMatch = prompt.match(
@@ -88,7 +108,47 @@ function extractQuotedTitle(prompt: string) {
   );
 
   if (namedMatch?.[1]) {
-    return normalizePromptText(namedMatch[1]).replace(/^["']|["']$/g, "");
+    return toDisplayTitle(
+      normalizePromptText(namedMatch[1]).replace(/^["']|["']$/g, ""),
+    );
+  }
+
+  return null;
+}
+
+function extractExplicitDurationMinutes(prompt: string) {
+  const hourMinuteMatch = prompt.match(
+    /\b(?:(\d+)\s*(?:hour|hours|hr|hrs))?(?:\s*(?:and)?\s*)?(?:(\d+)\s*(?:minute|minutes|min|mins))\b/i,
+  );
+
+  if (hourMinuteMatch) {
+    const hours = Number(hourMinuteMatch[1] ?? 0);
+    const minutes = Number(hourMinuteMatch[2] ?? 0);
+    const totalMinutes = hours * 60 + minutes;
+
+    if (totalMinutes >= 15 && totalMinutes <= 240) {
+      return totalMinutes;
+    }
+  }
+
+  const hourOnlyMatch = prompt.match(/\b(\d+)\s*(?:hour|hours|hr|hrs)\b/i);
+
+  if (hourOnlyMatch) {
+    const totalMinutes = Number(hourOnlyMatch[1]) * 60;
+
+    if (totalMinutes >= 15 && totalMinutes <= 240) {
+      return totalMinutes;
+    }
+  }
+
+  const minuteOnlyMatch = prompt.match(/\b(\d+)\s*(?:minute|minutes|min|mins)\b/i);
+
+  if (minuteOnlyMatch) {
+    const totalMinutes = Number(minuteOnlyMatch[1]);
+
+    if (totalMinutes >= 15 && totalMinutes <= 240) {
+      return totalMinutes;
+    }
   }
 
   return null;
@@ -276,6 +336,7 @@ function extractPromptDetails(
   const timing = extractTiming(normalizedPrompt, context.now, context.timeZone);
 
   return {
+    explicitDurationMinutes: extractExplicitDurationMinutes(normalizedPrompt),
     preferredWindow: inferWindow(normalizedPrompt),
     priority: inferPriority(normalizedPrompt, timing),
     suggestedTitle: extractQuotedTitle(normalizedPrompt),
@@ -283,5 +344,5 @@ function extractPromptDetails(
   };
 }
 
-export { extractPromptDetails, normalizePromptText };
+export { extractPromptDetails, normalizePromptText, toDisplayTitle };
 export type { PromptDetails, PromptTiming, TimingMode };
