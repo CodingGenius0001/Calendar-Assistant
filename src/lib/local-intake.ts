@@ -61,10 +61,16 @@ const INTENT_SYSTEM_PROMPT = [
 ].join(" ");
 
 function formatProgress(prefix: string, progress: ProgressEvent) {
-  const progressPercent =
-    typeof progress.progress === "number"
-      ? ` ${Math.round(progress.progress * 100)}%`
-      : "";
+  let progressPercent = "";
+
+  if (typeof progress.progress === "number" && Number.isFinite(progress.progress)) {
+    if (progress.progress >= 0 && progress.progress <= 1) {
+      progressPercent = ` ${Math.round(progress.progress * 100)}%`;
+    } else if (progress.progress > 1 && progress.progress <= 100) {
+      progressPercent = ` ${Math.round(progress.progress)}%`;
+    }
+  }
+
   const detail = progress.text ?? progress.status ?? progress.file ?? "loading";
   return `${prefix}: ${detail}${progressPercent}`;
 }
@@ -329,9 +335,7 @@ export async function transcribeAudioLocally(
     onStatus?.("Transcribing the recording...");
     const output = await transcriber(blobUrl, {
       chunk_length_s: 20,
-      language: "english",
       stride_length_s: 5,
-      task: "transcribe",
     });
 
     if (
