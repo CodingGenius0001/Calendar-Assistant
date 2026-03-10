@@ -1,7 +1,6 @@
 import { getServerSession } from "next-auth";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { authOptions } from "@/lib/auth";
-import { listUpcomingEvents } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
 
@@ -13,21 +12,8 @@ export default async function Home() {
       process.env.NEXTAUTH_SECRET,
   );
 
-  let upcomingEvents: Awaited<ReturnType<typeof listUpcomingEvents>> = [];
-  let calendarError: string | null = null;
-
-  if (session?.accessToken) {
-    try {
-      upcomingEvents = await listUpcomingEvents(session.accessToken);
-    } catch {
-      calendarError =
-        "I couldn't load your upcoming Google Calendar items. Reconnect Google if the token expired.";
-    }
-  }
-
   return (
     <DashboardShell
-      calendarError={calendarError}
       googleConfigured={googleConfigured}
       session={
         session
@@ -41,7 +27,6 @@ export default async function Home() {
             }
           : null
       }
-      upcomingEvents={upcomingEvents}
     />
   );
 }

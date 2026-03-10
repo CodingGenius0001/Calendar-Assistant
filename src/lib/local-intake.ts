@@ -5,6 +5,11 @@ import {
   calendarIntentSchema,
   type CalendarIntent,
 } from "@/lib/intent";
+import {
+  extractPromptDetails,
+  normalizePromptText,
+  type PromptTiming,
+} from "@/lib/prompt-details";
 
 const SPEECH_MODEL_ID = "Xenova/whisper-base.en";
 const INTENT_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
@@ -22,6 +27,7 @@ type ProgressEvent = {
 type LocalIntakeResult = {
   engine: IntakeEngine;
   interpretation: CalendarIntent;
+  timing: PromptTiming;
   transcript: string;
 };
 
@@ -83,58 +89,6 @@ function formatModelLoadingStatus(label: string, progress: ProgressEvent) {
     : `Preparing ${label}...`;
 }
 
-function normalizeTranscript(transcript: string) {
-  return transcript.replace(/\s+/g, " ").trim();
-}
-
-function inferPriority(transcript: string): CalendarIntent["priority"] {
-  if (/\b(urgent|asap|immediately|today|right away|high priority)\b/i.test(transcript)) {
-    return "high";
-  }
-
-  if (/\b(low priority|later this week|sometime|not urgent|whenever)\b/i.test(transcript)) {
-    return "low";
-  }
-
-  return "medium";
-}
-
-function inferWindow(transcript: string): CalendarIntent["preferredWindow"] {
-  if (/\b(morning|am|before noon|early)\b/i.test(transcript)) {
-    return "morning";
-  }
-
-  if (/\b(afternoon|after lunch)\b/i.test(transcript)) {
-    return "afternoon";
-  }
-
-  if (/\b(evening|tonight|night)\b/i.test(transcript)) {
-    return "evening";
-  }
-
-  return "any";
-}
-
-function inferRequestedDateLabel(transcript: string, priority: CalendarIntent["priority"]) {
-  const explicitDateMatch = transcript.match(
-    /\b(today|tomorrow|this week|later this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
-  );
-
-  if (explicitDateMatch) {
-    return explicitDateMatch[0].toLowerCase();
-  }
-
-  if (priority === "high") {
-    return "today";
-  }
-
-  if (priority === "low") {
-    return "later this week";
-  }
-
-  return "tomorrow";
-}
-
 function inferDurationMinutes(transcript: string) {
   const hourMinuteMatch = transcript.match(
     /\b(?:(\d+)\s*(?:hour|hours|hr|hrs))?(?:\s*(?:and)?\s*)?(?:(\d+)\s*(?:minute|minutes|min|mins))\b/i,
@@ -174,7 +128,7 @@ function inferDurationMinutes(transcript: string) {
 }
 
 function inferTitle(transcript: string) {
-  const cleaned = normalizeTranscript(transcript);
+  const cleaned = normalizePromptText(transcript);
 
   if (!cleaned) {
     return "New agenda item";
@@ -189,17 +143,50 @@ function inferTitle(transcript: string) {
   return candidate.length > 120 ? candidate.slice(0, 117).trimEnd() : candidate;
 }
 
-function buildConfirmationMessage(intent: CalendarIntent) {
+function buildConfirmationMessage(intent: CalendarIntent, timing: PromptTiming) {
+  if (timing.mode === "exact") {
+    return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes at ${timing.requestedDateLabel}.`;
+  }
+
+  if (timing.mode === "day") {
+    return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes on ${timing.requestedDateLabel}.`;
+  }
+
   return `I understood this as "${intent.title}" for ${intent.durationMinutes} minutes, with ${intent.priority} priority${intent.preferredWindow === "any" ? "" : ` in the ${intent.preferredWindow}`}.`;
 }
 
-function buildFallbackIntent(transcript: string): CalendarIntent {
-  const notes = normalizeTranscript(transcript);
-  const priority = inferPriority(notes);
-  const preferredWindow = inferWindow(notes);
+function finalizeIntent(
+  intent: CalendarIntent,
+  details: ReturnType<typeof extractPromptDetails>,
+): CalendarIntent {
+  const title = intent.title.trim() || details.suggestedTitle || inferTitle(intent.notes);
+
+  return {
+    ...intent,
+    preferredWindow: details.preferredWindow,
+    priority: details.priority,
+    requestedDateLabel: details.timing.requestedDateLabel,
+    title,
+    userConfirmationMessage: buildConfirmationMessage(
+      {
+        ...intent,
+        preferredWindow: details.preferredWindow,
+        priority: details.priority,
+        requestedDateLabel: details.timing.requestedDateLabel,
+        title,
+      },
+      details.timing,
+    ),
+  };
+}
+
+function buildFallbackIntent(
+  transcript: string,
+  details: ReturnType<typeof extractPromptDetails>,
+): CalendarIntent {
+  const notes = normalizePromptText(transcript);
   const durationMinutes = inferDurationMinutes(notes);
-  const requestedDateLabel = inferRequestedDateLabel(notes, priority);
-  const title = inferTitle(notes);
+  const title = details.suggestedTitle || inferTitle(notes);
   const needsClarification = notes.split(" ").length < 4;
   const confidence = needsClarification ? "low" : "medium";
 
@@ -209,9 +196,9 @@ function buildFallbackIntent(transcript: string): CalendarIntent {
     durationMinutes,
     needsClarification,
     notes,
-    preferredWindow,
-    priority,
-    requestedDateLabel,
+    preferredWindow: details.preferredWindow,
+    priority: details.priority,
+    requestedDateLabel: details.timing.requestedDateLabel,
     title,
     userConfirmationMessage: buildConfirmationMessage({
       action: "schedule_event",
@@ -219,12 +206,12 @@ function buildFallbackIntent(transcript: string): CalendarIntent {
       durationMinutes,
       needsClarification,
       notes,
-      preferredWindow,
-      priority,
-      requestedDateLabel,
+      preferredWindow: details.preferredWindow,
+      priority: details.priority,
+      requestedDateLabel: details.timing.requestedDateLabel,
       title,
       userConfirmationMessage: "",
-    }),
+    }, details.timing),
   };
 }
 
@@ -352,7 +339,7 @@ export async function transcribeAudioLocally(
       "text" in output &&
       typeof output.text === "string"
     ) {
-      return normalizeTranscript(output.text);
+      return normalizePromptText(output.text);
     }
 
     throw new Error("The speech model returned an invalid transcript.");
@@ -363,13 +350,19 @@ export async function transcribeAudioLocally(
 
 export async function interpretTranscriptLocally(
   transcript: string,
+  context: {
+    now: Date;
+    timeZone: string;
+  },
   onStatus?: StatusCallback,
 ): Promise<LocalIntakeResult> {
-  const normalizedTranscript = normalizeTranscript(transcript);
+  const normalizedTranscript = normalizePromptText(transcript);
 
   if (!normalizedTranscript) {
     throw new Error("The transcript was empty.");
   }
+
+  const promptDetails = extractPromptDetails(normalizedTranscript, context);
 
   try {
     const engine = await getIntentEngine(onStatus);
@@ -380,7 +373,14 @@ export async function interpretTranscriptLocally(
       frequency_penalty: 0,
       messages: [
         { content: INTENT_SYSTEM_PROMPT, role: "system" },
-        { content: normalizedTranscript, role: "user" },
+        {
+          content: [
+            `User time zone: ${context.timeZone}.`,
+            `User local time: ${context.now.toISOString()}.`,
+            `Transcript: ${normalizedTranscript}`,
+          ].join(" "),
+          role: "user",
+        },
       ],
       presence_penalty: 0,
       response_format: {
@@ -391,13 +391,15 @@ export async function interpretTranscriptLocally(
     });
 
     const content = getMessageContent(response);
-    const parsedIntent = calendarIntentSchema.parse(
-      JSON.parse(extractJsonObject(content)),
+    const parsedIntent = finalizeIntent(
+      calendarIntentSchema.parse(JSON.parse(extractJsonObject(content))),
+      promptDetails,
     );
 
     return {
       engine: "local-llm",
       interpretation: parsedIntent,
+      timing: promptDetails.timing,
       transcript: normalizedTranscript,
     };
   } catch {
@@ -405,7 +407,8 @@ export async function interpretTranscriptLocally(
 
     return {
       engine: "rules-fallback",
-      interpretation: buildFallbackIntent(normalizedTranscript),
+      interpretation: buildFallbackIntent(normalizedTranscript, promptDetails),
+      timing: promptDetails.timing,
       transcript: normalizedTranscript,
     };
   }

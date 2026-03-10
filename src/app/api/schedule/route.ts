@@ -3,7 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { createCalendarEvent, listBusyBlocks } from "@/lib/google";
-import { buildSearchRange, findAvailableSlot } from "@/lib/scheduler";
+import {
+  buildExactSearchRange,
+  buildRequestedDaySearchRange,
+  buildSearchRange,
+  findAvailableSlot,
+} from "@/lib/scheduler";
 
 export const runtime = "nodejs";
 
@@ -14,6 +19,13 @@ const scheduleRequestSchema = z.object({
   notes: z.string().max(4000).default(""),
   preferredWindow: z.enum(["any", "morning", "afternoon", "evening"]),
   priority: z.enum(["high", "medium", "low"]),
+  promptTiming: z.object({
+    mode: z.enum(["exact", "day", "flexible"]),
+    requestedDateKey: z.string().nullable(),
+    requestedDateLabel: z.string().max(120),
+    requestedStartIso: z.string().nullable(),
+    requestedTimeLabel: z.string().nullable(),
+  }),
   timeZone: z.string().min(2).max(100),
   title: z.string().trim().max(120),
 });
@@ -69,11 +81,27 @@ export async function POST(request: Request) {
   }
 
   const title = inferTitle(parsed.data.title, parsed.data.notes);
-  const searchRange = buildSearchRange({
-    now,
-    priority: parsed.data.priority,
-    timeZone: parsed.data.timeZone,
-  });
+  const requestedStart = parsed.data.promptTiming.requestedStartIso
+    ? new Date(parsed.data.promptTiming.requestedStartIso)
+    : null;
+
+  if (requestedStart && Number.isNaN(requestedStart.getTime())) {
+    return NextResponse.json({ error: "The requested start time was invalid." }, { status: 400 });
+  }
+
+  const searchRange =
+    parsed.data.promptTiming.mode === "exact" && requestedStart
+      ? buildExactSearchRange(requestedStart, parsed.data.timeZone)
+      : parsed.data.promptTiming.mode === "day" && parsed.data.promptTiming.requestedDateKey
+        ? buildRequestedDaySearchRange(
+            parsed.data.promptTiming.requestedDateKey,
+            parsed.data.timeZone,
+          )
+        : buildSearchRange({
+            now,
+            priority: parsed.data.priority,
+            timeZone: parsed.data.timeZone,
+          });
 
   try {
     const busyBlocks = await listBusyBlocks(
@@ -88,16 +116,27 @@ export async function POST(request: Request) {
         now,
         preferredWindow: parsed.data.preferredWindow,
         priority: parsed.data.priority,
+        requestedDateKey: parsed.data.promptTiming.requestedDateKey,
+        requestedStart,
+        timingMode: parsed.data.promptTiming.mode,
         timeZone: parsed.data.timeZone,
       },
       busyBlocks,
     );
 
     if (!scheduledSlot) {
+      const timingError =
+        parsed.data.promptTiming.mode === "exact"
+          ? requestedStart && requestedStart < now
+            ? "The exact time you asked for has already passed in your time zone. Edit the prompt or choose a later time."
+            : "The exact time you asked for is unavailable. Edit the prompt or choose a different time."
+          : parsed.data.promptTiming.mode === "day"
+            ? `I couldn't find an opening on ${parsed.data.promptTiming.requestedDateLabel}. Edit the prompt or try a different day.`
+            : "I couldn't find an open slot with the current duration and priority. Try shortening the event or loosening the time window.";
+
       return NextResponse.json(
         {
-          error:
-            "I couldn't find an open slot with the current duration and priority. Try shortening the event or loosening the time window.",
+          error: timingError,
         },
         { status: 409 },
       );

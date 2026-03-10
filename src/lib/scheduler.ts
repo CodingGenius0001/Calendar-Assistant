@@ -3,6 +3,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 type EventPriority = "high" | "medium" | "low";
 type PreferredWindow = "any" | "morning" | "afternoon" | "evening";
+type TimingMode = "exact" | "day" | "flexible";
 
 type BusyBlock = {
   end: Date;
@@ -14,6 +15,9 @@ type ScheduleInput = {
   now: Date;
   preferredWindow: PreferredWindow;
   priority: EventPriority;
+  requestedDateKey?: string | null;
+  requestedStart?: Date | null;
+  timingMode: TimingMode;
   timeZone: string;
 };
 
@@ -98,6 +102,15 @@ function overlapsBusyBlock(start: Date, end: Date, busyBlocks: BusyBlock[]) {
   );
 }
 
+function getDayOffsetFromDateKey(dateKey: string, now: Date, timeZone: string) {
+  const todayKey = getLocalDateKey(now, timeZone);
+  const todayAnchor = buildZonedDate(todayKey, 12, 0, timeZone);
+  const targetAnchor = buildZonedDate(dateKey, 12, 0, timeZone);
+  return Math.round(
+    (targetAnchor.getTime() - todayAnchor.getTime()) / (24 * 60 * 60 * 1000),
+  );
+}
+
 function describeBucket(dayOffset: number): "today" | "tomorrow" | "later" {
   if (dayOffset <= 0) {
     return "today";
@@ -138,6 +151,56 @@ function buildRationale(
   return `${priorityRule.summary} ${placementLine} ${windowLine}`;
 }
 
+function findSlotOnDate(
+  input: Pick<ScheduleInput, "durationMinutes" | "now" | "preferredWindow" | "timeZone">,
+  busyBlocks: BusyBlock[],
+  dateKey: string,
+  rationaleBuilder: (matchedWindow: WindowDefinition) => string,
+) {
+  const busyBlocksSorted = [...busyBlocks].sort(
+    (left, right) => left.start.getTime() - right.start.getTime(),
+  );
+  const windows = WINDOW_RULES[input.preferredWindow];
+  const dayOffset = getDayOffsetFromDateKey(dateKey, input.now, input.timeZone);
+
+  for (const matchedWindow of windows) {
+    const windowStart = buildZonedDate(
+      dateKey,
+      matchedWindow.startHour,
+      0,
+      input.timeZone,
+    );
+    const windowEnd = buildZonedDate(
+      dateKey,
+      matchedWindow.endHour,
+      0,
+      input.timeZone,
+    );
+
+    let cursor = roundUpToQuarterHour(windowStart);
+    if (dayOffset === 0 && cursor < input.now) {
+      cursor = roundUpToQuarterHour(input.now);
+    }
+
+    while (addMinutes(cursor, input.durationMinutes) <= windowEnd) {
+      const slotEnd = addMinutes(cursor, input.durationMinutes);
+
+      if (!overlapsBusyBlock(cursor, slotEnd, busyBlocksSorted)) {
+        return {
+          bucket: describeBucket(dayOffset),
+          end: slotEnd,
+          rationale: rationaleBuilder(matchedWindow),
+          start: cursor,
+        };
+      }
+
+      cursor = addMinutes(cursor, 15);
+    }
+  }
+
+  return null;
+}
+
 export function buildSearchRange(input: Pick<ScheduleInput, "now" | "priority" | "timeZone">) {
   const offsets = PRIORITY_RULES[input.priority].offsets;
   const anchorDay = getLocalDateKey(input.now, input.timeZone);
@@ -157,63 +220,87 @@ export function buildSearchRange(input: Pick<ScheduleInput, "now" | "priority" |
   };
 }
 
+export function buildExactSearchRange(requestedStart: Date, timeZone: string) {
+  const requestedDateKey = getLocalDateKey(requestedStart, timeZone);
+
+  return {
+    timeMax: buildZonedDate(requestedDateKey, 23, 59, timeZone),
+    timeMin: buildZonedDate(requestedDateKey, 0, 0, timeZone),
+  };
+}
+
+export function buildRequestedDaySearchRange(requestedDateKey: string, timeZone: string) {
+  return {
+    timeMax: buildZonedDate(requestedDateKey, 23, 59, timeZone),
+    timeMin: buildZonedDate(requestedDateKey, 0, 0, timeZone),
+  };
+}
+
 export function findAvailableSlot(
   input: ScheduleInput,
   busyBlocks: BusyBlock[],
 ): ScheduledSlot | null {
+  if (input.timingMode === "exact" && input.requestedStart) {
+    const slotEnd = addMinutes(input.requestedStart, input.durationMinutes);
+
+    if (input.requestedStart < input.now) {
+      return null;
+    }
+
+    if (overlapsBusyBlock(input.requestedStart, slotEnd, busyBlocks)) {
+      return null;
+    }
+
+    const requestedDateKey = getLocalDateKey(input.requestedStart, input.timeZone);
+    const dayOffset = getDayOffsetFromDateKey(
+      requestedDateKey,
+      input.now,
+      input.timeZone,
+    );
+
+    return {
+      bucket: describeBucket(dayOffset),
+      end: slotEnd,
+      rationale: "This matches the exact time you asked for.",
+      start: input.requestedStart,
+    };
+  }
+
+  if (input.timingMode === "day" && input.requestedDateKey) {
+    return findSlotOnDate(
+      input,
+      busyBlocks,
+      input.requestedDateKey,
+      () =>
+        "You asked for a specific day, so I searched that day first and used the earliest opening that fit.",
+    );
+  }
+
   const priorityRule = PRIORITY_RULES[input.priority];
   const todayLocalKey = getLocalDateKey(input.now, input.timeZone);
   const anchorNoon = buildZonedDate(todayLocalKey, 12, 0, input.timeZone);
-  const busyBlocksSorted = [...busyBlocks].sort(
-    (left, right) => left.start.getTime() - right.start.getTime(),
-  );
 
   for (const dayOffset of priorityRule.offsets) {
     const dateKey = getLocalDateKey(addDays(anchorNoon, dayOffset), input.timeZone);
-    const windows = WINDOW_RULES[input.preferredWindow];
+    const flexibleSlot = findSlotOnDate(
+      input,
+      busyBlocks,
+      dateKey,
+      (matchedWindow) =>
+        buildRationale(
+          input.priority,
+          dayOffset,
+          input.preferredWindow,
+          matchedWindow,
+        ),
+    );
 
-    for (const matchedWindow of windows) {
-      const windowStart = buildZonedDate(
-        dateKey,
-        matchedWindow.startHour,
-        0,
-        input.timeZone,
-      );
-      const windowEnd = buildZonedDate(
-        dateKey,
-        matchedWindow.endHour,
-        0,
-        input.timeZone,
-      );
-
-      let cursor = roundUpToQuarterHour(windowStart);
-      if (dayOffset === 0 && cursor < input.now) {
-        cursor = roundUpToQuarterHour(input.now);
-      }
-
-      while (addMinutes(cursor, input.durationMinutes) <= windowEnd) {
-        const slotEnd = addMinutes(cursor, input.durationMinutes);
-
-        if (!overlapsBusyBlock(cursor, slotEnd, busyBlocksSorted)) {
-          return {
-            bucket: describeBucket(dayOffset),
-            end: slotEnd,
-            rationale: buildRationale(
-              input.priority,
-              dayOffset,
-              input.preferredWindow,
-              matchedWindow,
-            ),
-            start: cursor,
-          };
-        }
-
-        cursor = addMinutes(cursor, 15);
-      }
+    if (flexibleSlot) {
+      return flexibleSlot;
     }
   }
 
   return null;
 }
 
-export type { BusyBlock, EventPriority, PreferredWindow, ScheduledSlot };
+export type { BusyBlock, EventPriority, PreferredWindow, ScheduledSlot, TimingMode };
