@@ -64,7 +64,7 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           access_type: "offline",
-          prompt: "consent",
+          prompt: "consent select_account",
           response_type: "code",
           scope: GOOGLE_CALENDAR_SCOPE,
         },
