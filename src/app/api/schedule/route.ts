@@ -14,6 +14,7 @@ import {
 export const runtime = "nodejs";
 
 const scheduleRequestSchema = z.object({
+  attendeeEmails: z.array(z.string().email()).max(20).default([]),
   clientNow: z.string().optional(),
   durationMinutes: z.number().int().min(15).max(240),
   mode: z.enum(["preview", "book"]),
@@ -27,6 +28,7 @@ const scheduleRequestSchema = z.object({
     requestedStartIso: z.string().nullable(),
     requestedTimeLabel: z.string().nullable(),
   }),
+  reminderMinutes: z.array(z.number().int().min(1).max(10080)).max(10).default([]),
   timeZone: z.string().min(2).max(100),
   title: z.string().trim().max(120),
 });
@@ -47,7 +49,7 @@ function inferTitle(title: string, notes: string) {
 
   return cleanedNotes
     ? toDisplayTitle(`${cleanedNotes}${cleanedNotes.length >= 32 ? "..." : ""}`)
-    : "New Agenda Item";
+    : "Scheduled Meeting";
 }
 
 export async function POST(request: Request) {
@@ -131,8 +133,8 @@ export async function POST(request: Request) {
       const timingError =
         parsed.data.promptTiming.mode === "exact"
           ? requestedStart && requestedStart < now
-            ? "The exact time you asked for has already passed in your time zone. Edit the prompt or choose a later time."
-            : "The exact time you asked for is unavailable. Edit the prompt or choose a different time."
+            ? "The original time has already passed, and I could not find another opening later that day. Edit the prompt or choose a later time."
+            : "The exact time you asked for is unavailable, and I could not find another opening later that day. Edit the prompt or choose a different time."
           : parsed.data.promptTiming.mode === "day"
             ? `I couldn't find an opening on ${parsed.data.promptTiming.requestedDateLabel}. Edit the prompt or try a different day.`
             : "I couldn't find an open slot with the current duration and priority. Try shortening the event or loosening the time window.";
@@ -147,8 +149,10 @@ export async function POST(request: Request) {
 
     if (parsed.data.mode === "book") {
       const event = await createCalendarEvent(session.accessToken, {
+        attendeeEmails: parsed.data.attendeeEmails,
         end: scheduledSlot.end,
         notes: parsed.data.notes,
+        reminderMinutes: parsed.data.reminderMinutes,
         start: scheduledSlot.start,
         timeZone: parsed.data.timeZone,
         title,
@@ -156,6 +160,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         eventLink: event.htmlLink,
+        matchType: scheduledSlot.matchType,
         slot: {
           bucket: scheduledSlot.bucket,
           end: scheduledSlot.end.toISOString(),
@@ -169,6 +174,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
+      matchType: scheduledSlot.matchType,
       slot: {
         bucket: scheduledSlot.bucket,
         end: scheduledSlot.end.toISOString(),

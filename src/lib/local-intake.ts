@@ -26,8 +26,10 @@ type ProgressEvent = {
 };
 
 type LocalIntakeResult = {
+  attendeeEmails: string[];
   engine: IntakeEngine;
   interpretation: CalendarIntent;
+  reminderMinutes: number[];
   timing: PromptTiming;
   transcript: string;
 };
@@ -66,6 +68,22 @@ const INTENT_SYSTEM_PROMPT = [
   "Keep userConfirmationMessage short and written for the end user.",
   "Return only valid JSON matching the provided schema.",
 ].join(" ");
+
+const GENERIC_EVENT_TITLES = new Set([
+  "agenda item",
+  "appointment",
+  "call",
+  "chat",
+  "event",
+  "meeting",
+  "new agenda item",
+  "scheduled appointment",
+  "scheduled call",
+  "scheduled event",
+  "scheduled meeting",
+  "session",
+  "sync",
+]);
 
 function formatProgressPercent(progressValue?: number) {
   if (typeof progressValue !== "number" || !Number.isFinite(progressValue)) {
@@ -146,6 +164,20 @@ function inferTitle(transcript: string) {
   return toDisplayTitle(trimmedCandidate);
 }
 
+function isWeakTitleCandidate(value: string) {
+  const normalized = normalizePromptText(value).toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (GENERIC_EVENT_TITLES.has(normalized)) {
+    return true;
+  }
+
+  return /^(schedule|book|create|add|make)\b/i.test(normalized);
+}
+
 function formatDurationLabel(durationMinutes: number) {
   if (durationMinutes % 60 === 0) {
     const hours = durationMinutes / 60;
@@ -171,9 +203,11 @@ function finalizeIntent(
   intent: CalendarIntent,
   details: ReturnType<typeof extractPromptDetails>,
 ): CalendarIntent {
-  const title = toDisplayTitle(
-    intent.title.trim() || details.suggestedTitle || inferTitle(intent.notes),
-  );
+  const preferredTitle = details.suggestedTitle || inferTitle(intent.notes);
+  const titleSource = isWeakTitleCandidate(intent.title)
+    ? preferredTitle
+    : intent.title.trim() || preferredTitle;
+  const title = toDisplayTitle(titleSource);
   const durationMinutes = details.explicitDurationMinutes ?? intent.durationMinutes;
 
   return {
@@ -415,8 +449,10 @@ export async function interpretTranscriptLocally(
     );
 
     return {
+      attendeeEmails: promptDetails.attendeeEmails,
       engine: "local-llm",
       interpretation: parsedIntent,
+      reminderMinutes: promptDetails.reminderMinutes,
       timing: promptDetails.timing,
       transcript: normalizedTranscript,
     };
@@ -424,8 +460,10 @@ export async function interpretTranscriptLocally(
     onStatus?.("Switching to the built-in fallback parser...");
 
     return {
+      attendeeEmails: promptDetails.attendeeEmails,
       engine: "rules-fallback",
       interpretation: buildFallbackIntent(normalizedTranscript, promptDetails),
+      reminderMinutes: promptDetails.reminderMinutes,
       timing: promptDetails.timing,
       transcript: normalizedTranscript,
     };

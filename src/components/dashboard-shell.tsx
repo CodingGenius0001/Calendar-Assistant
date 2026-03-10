@@ -22,11 +22,13 @@ type SessionSnapshot = {
 } | null;
 
 type DraftState = {
+  attendeeEmails: string[];
   durationMinutes: number;
   notes: string;
   preferredWindow: PreferredWindow;
   priority: EventPriority;
   promptTiming: PromptTiming;
+  reminderMinutes: number[];
   timeZone: string;
   title: string;
 };
@@ -35,6 +37,7 @@ type FlowStep = "record" | "review" | "recommend";
 
 type ScheduleResult = {
   eventLink?: string | null;
+  matchType: "requested" | "adjusted" | "recommended";
   rationale: string;
   slot: {
     bucket: "today" | "tomorrow" | "later";
@@ -63,11 +66,13 @@ function createEmptyTiming(): PromptTiming {
 
 function createInitialDraft(timeZone: string): DraftState {
   return {
+    attendeeEmails: [],
     durationMinutes: 45,
     notes: "",
     preferredWindow: "any",
     priority: "medium",
     promptTiming: createEmptyTiming(),
+    reminderMinutes: [],
     timeZone,
     title: "",
   };
@@ -98,6 +103,26 @@ function formatTimingSummary(timing: PromptTiming) {
   }
 
   return "Flexible timing";
+}
+
+function formatDurationSummary(durationMinutes: number) {
+  if (durationMinutes % 60 === 0) {
+    const hours = durationMinutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+
+  return `${durationMinutes} minutes`;
+}
+
+function formatReminderSummary(reminderMinutes: number[]) {
+  if (!reminderMinutes.length) {
+    return "Default reminders";
+  }
+
+  return [...reminderMinutes]
+    .sort((left, right) => right - left)
+    .map((minutes) => `${formatDurationSummary(minutes)} before`)
+    .join(", ");
 }
 
 function StepMarker({
@@ -240,6 +265,7 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
     try {
       const response = await fetch("/api/schedule", {
         body: JSON.stringify({
+          attendeeEmails: activeDraft.attendeeEmails,
           clientNow: new Date().toISOString(),
           durationMinutes: activeDraft.durationMinutes,
           mode,
@@ -247,6 +273,7 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
           preferredWindow: activeDraft.preferredWindow,
           priority: activeDraft.priority,
           promptTiming: activeDraft.promptTiming,
+          reminderMinutes: activeDraft.reminderMinutes,
           timeZone: activeDraft.timeZone,
           title: activeDraft.title,
         }),
@@ -293,11 +320,13 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
     }
 
     const nextDraft: DraftState = {
+      attendeeEmails: intakeResult.attendeeEmails,
       durationMinutes: intakeResult.interpretation.durationMinutes,
       notes: intakeResult.interpretation.notes,
       preferredWindow: intakeResult.interpretation.preferredWindow,
       priority: intakeResult.interpretation.priority,
       promptTiming: intakeResult.timing,
+      reminderMinutes: intakeResult.reminderMinutes,
       timeZone: draft.timeZone,
       title: intakeResult.interpretation.title,
     };
@@ -310,8 +339,14 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
   if (!session) {
     return (
       <main className="soft-grid min-h-screen px-5 py-8 text-[var(--foreground)] md:px-10 md:py-10">
-        <section className="glass-panel mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center gap-10 rounded-[2rem] border p-8 md:p-12 lg:grid-cols-[0.92fr_1.08fr]">
-          <div className="space-y-8">
+        <section className="glass-panel relative mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-6xl overflow-hidden rounded-[2rem] border p-8 md:p-12 lg:grid-cols-[0.92fr_1.08fr] lg:items-stretch">
+          <div className="pointer-events-none absolute inset-0 lg:hidden">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_22%,rgba(216,140,65,0.22),transparent_28%),radial-gradient(circle_at_86%_18%,rgba(21,93,82,0.16),transparent_28%),radial-gradient(circle_at_62%_82%,rgba(17,32,51,0.08),transparent_30%)]" />
+            <div className="absolute -left-10 top-20 h-52 w-52 rounded-full bg-[rgba(216,140,65,0.14)] blur-3xl" />
+            <div className="absolute bottom-0 right-0 h-64 w-64 rounded-full bg-[rgba(21,93,82,0.12)] blur-3xl" />
+          </div>
+
+          <div className="relative z-10 flex flex-col justify-center space-y-8">
             <div className="space-y-6">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[rgba(17,32,51,0.12)] bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm font-medium text-[var(--muted)]">
                 <span className="inline-flex size-2 rounded-full bg-[var(--signal)]" />
@@ -353,13 +388,13 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
             ) : null}
           </div>
 
-          <div className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-[rgba(17,32,51,0.1)] bg-[linear-gradient(160deg,rgba(255,255,255,0.9),rgba(250,243,232,0.72))] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+          <div className="relative hidden min-h-[560px] self-stretch overflow-hidden rounded-[2rem] border border-[rgba(17,32,51,0.1)] bg-[linear-gradient(160deg,rgba(255,255,255,0.9),rgba(250,243,232,0.72))] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] lg:block lg:min-h-full">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(216,140,65,0.28),transparent_24%),radial-gradient(circle_at_80%_18%,rgba(21,93,82,0.24),transparent_26%),radial-gradient(circle_at_52%_70%,rgba(17,32,51,0.12),transparent_24%)]" />
             <div className="absolute -top-10 right-8 h-44 w-44 rounded-full bg-[rgba(216,140,65,0.2)] blur-2xl" />
             <div className="absolute bottom-4 left-0 h-56 w-56 rounded-full bg-[rgba(21,93,82,0.18)] blur-3xl" />
 
-            <div className="relative flex h-full min-h-[372px] items-center justify-center">
-              <div className="relative h-[320px] w-full max-w-[460px]">
+            <div className="relative flex h-full min-h-[520px] items-center justify-center">
+              <div className="relative h-full min-h-[500px] w-full max-w-[520px]">
                 <div className="absolute left-[10%] top-[12%] h-40 w-40 rounded-[36%_64%_55%_45%/42%_42%_58%_58%] border border-[rgba(17,32,51,0.08)] bg-[linear-gradient(145deg,rgba(21,93,82,0.94),rgba(45,121,109,0.7))] shadow-[0_28px_60px_rgba(21,93,82,0.2)]" />
                 <div className="absolute right-[11%] top-[18%] h-28 w-28 rounded-full border border-[rgba(17,32,51,0.08)] bg-[rgba(255,255,255,0.86)] shadow-[0_20px_40px_rgba(17,32,51,0.1)]" />
                 <div className="absolute bottom-[7%] left-[17%] h-24 w-52 rounded-full border border-[rgba(17,32,51,0.08)] bg-[linear-gradient(120deg,rgba(17,32,51,0.08),rgba(216,140,65,0.18))] backdrop-blur-sm" />
@@ -526,7 +561,7 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                   </p>
                   <p>
                     <span className="font-semibold">Duration:</span>{" "}
-                    {intakeResult.interpretation.durationMinutes} minutes
+                    {formatDurationSummary(intakeResult.interpretation.durationMinutes)}
                   </p>
                   <p>
                     <span className="font-semibold">When:</span>{" "}
@@ -548,6 +583,19 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                       </p>
                     </>
                   ) : null}
+                  <p>
+                    <span className="font-semibold">Google Meet:</span> Added automatically
+                  </p>
+                  <p>
+                    <span className="font-semibold">Attendees:</span>{" "}
+                    {intakeResult.attendeeEmails.length > 0
+                      ? intakeResult.attendeeEmails.join(", ")
+                      : "None detected"}
+                  </p>
+                  <p className="md:col-span-2">
+                    <span className="font-semibold">Reminders:</span>{" "}
+                    {formatReminderSummary(intakeResult.reminderMinutes)}
+                  </p>
                 </div>
               </div>
 
@@ -634,7 +682,11 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                 <div className="space-y-4">
                   <div className="rounded-[1.5rem] border border-[var(--border)] bg-[rgba(255,255,255,0.86)] p-5">
                     <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-                      {draft.promptTiming.mode === "flexible"
+                      {result.matchType === "requested"
+                        ? "Requested slot"
+                        : result.matchType === "adjusted"
+                          ? "Adjusted recommendation"
+                          : draft.promptTiming.mode === "flexible"
                         ? "Recommended slot"
                         : "Requested slot"}
                     </p>
@@ -646,6 +698,25 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                     <span className="mt-4 inline-flex rounded-full bg-[var(--surface-accent)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--button)]">
                       {result.slot.bucket}
                     </span>
+                    <div className="mt-5 grid gap-2 text-sm leading-6 text-[var(--foreground)] md:grid-cols-2">
+                      <p>
+                        <span className="font-semibold">Duration:</span>{" "}
+                        {formatDurationSummary(draft.durationMinutes)}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Google Meet:</span> Included
+                      </p>
+                      <p>
+                        <span className="font-semibold">Attendees:</span>{" "}
+                        {draft.attendeeEmails.length > 0
+                          ? draft.attendeeEmails.join(", ")
+                          : "None added"}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Reminders:</span>{" "}
+                        {formatReminderSummary(draft.reminderMinutes)}
+                      </p>
+                    </div>
                   </div>
 
                   <p className="rounded-[1.5rem] bg-[rgba(17,32,51,0.04)] p-5 text-sm leading-7 text-[var(--foreground)]">
@@ -656,6 +727,11 @@ export function DashboardShell({ googleConfigured, session }: DashboardShellProp
                     <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
                       Priority only came into play because your request did not include a
                       specific day and time.
+                    </div>
+                  ) : result.matchType === "adjusted" ? (
+                    <div className="rounded-[1.5rem] bg-[rgba(216,140,65,0.12)] p-4 text-sm leading-6 text-[var(--foreground)]">
+                      A specific time was detected, but that slot was not available, so I
+                      suggested the closest opening later that same day.
                     </div>
                   ) : (
                     <div className="rounded-[1.5rem] bg-[rgba(21,93,82,0.08)] p-4 text-sm leading-6 text-[var(--foreground)]">

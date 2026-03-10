@@ -10,8 +10,10 @@ type UpcomingEvent = {
 };
 
 type CreateCalendarEventInput = {
+  attendeeEmails: string[];
   end: Date;
   notes: string;
+  reminderMinutes: number[];
   start: Date;
   timeZone: string;
   title: string;
@@ -88,23 +90,45 @@ export async function createCalendarEvent(
   input: CreateCalendarEventInput,
 ) {
   const calendar = getCalendarClient(accessToken);
+  const reminderOverrides = input.reminderMinutes.map((minutes) => ({
+    method: "popup" as const,
+    minutes,
+  }));
+  const reminders =
+    reminderOverrides.length > 0
+      ? {
+          overrides: reminderOverrides,
+          useDefault: false,
+        }
+      : {
+          useDefault: true,
+        };
   const response = await calendar.events.insert({
     calendarId: "primary",
+    conferenceDataVersion: 1,
     requestBody: {
+      attendees: input.attendeeEmails.map((email) => ({ email })),
+      conferenceData: {
+        createRequest: {
+          conferenceSolutionKey: {
+            type: "hangoutsMeet",
+          },
+          requestId: crypto.randomUUID(),
+        },
+      },
       description: buildEventDescription(input.notes),
       end: {
         dateTime: input.end.toISOString(),
         timeZone: input.timeZone,
       },
-      reminders: {
-        useDefault: true,
-      },
+      reminders,
       start: {
         dateTime: input.start.toISOString(),
         timeZone: input.timeZone,
       },
       summary: input.title,
     },
+    sendUpdates: input.attendeeEmails.length > 0 ? "all" : "none",
   });
 
   return {

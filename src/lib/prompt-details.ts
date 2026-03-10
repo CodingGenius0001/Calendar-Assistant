@@ -13,9 +13,11 @@ type PromptTiming = {
 };
 
 type PromptDetails = {
+  attendeeEmails: string[];
   explicitDurationMinutes: number | null;
   preferredWindow: PreferredWindow;
   priority: EventPriority;
+  reminderMinutes: number[];
   suggestedTitle: string | null;
   timing: PromptTiming;
 };
@@ -35,6 +37,23 @@ const WEEKDAY_INDEX: Record<string, number> = {
   tuesday: 2,
   wednesday: 3,
 };
+
+const GENERIC_TITLE_CANDIDATES = new Set([
+  "agenda item",
+  "appointment",
+  "call",
+  "chat",
+  "event",
+  "meeting",
+  "new agenda item",
+  "phone call",
+  "scheduled appointment",
+  "scheduled call",
+  "scheduled event",
+  "scheduled meeting",
+  "session",
+  "sync",
+]);
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
@@ -61,6 +80,24 @@ function toDisplayTitle(value: string) {
     .replace(/\b(a|an|and|at|for|in|of|on|or|the|to|with)\b/, (word) =>
       word.charAt(0).toUpperCase() + word.slice(1),
     );
+}
+
+function normalizeTitleCandidate(value: string) {
+  return normalizePromptText(
+    value
+      .replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "")
+      .replace(/\b(?:please|schedule|set up|book|create|add|make it|make)\b/gi, "")
+      .replace(/\b(?:today|tomorrow|tonight|later this week|next week)\b/gi, "")
+      .replace(
+        /\b(?:at|for|on|by|before|after|invite|with reminder|remind|email)\b.*$/i,
+        "",
+      ),
+  );
+}
+
+function isGenericTitleCandidate(value: string) {
+  const normalized = normalizePromptText(value).toLowerCase();
+  return !normalized || GENERIC_TITLE_CANDIDATES.has(normalized);
 }
 
 function buildZonedDate(dateKey: string, hour: number, minute: number, timeZone: string) {
@@ -100,7 +137,8 @@ function extractQuotedTitle(prompt: string) {
   const quotedMatch = prompt.match(/"([^"]{1,120})"/);
 
   if (quotedMatch?.[1]) {
-    return toDisplayTitle(quotedMatch[1].trim());
+    const candidate = toDisplayTitle(quotedMatch[1].trim());
+    return isGenericTitleCandidate(candidate) ? null : candidate;
   }
 
   const namedMatch = prompt.match(
@@ -108,12 +146,63 @@ function extractQuotedTitle(prompt: string) {
   );
 
   if (namedMatch?.[1]) {
-    return toDisplayTitle(
+    const candidate = toDisplayTitle(
       normalizePromptText(namedMatch[1]).replace(/^["']|["']$/g, ""),
     );
+    return isGenericTitleCandidate(candidate) ? null : candidate;
   }
 
   return null;
+}
+
+function extractContextualTitle(prompt: string) {
+  const withMatch = prompt.match(
+    /\b(meeting|call|chat|sync|appointment|session)\s+with\s+([^.,!?]+?)(?=\s+(?:at|for|today|tomorrow|on|later|next|this|invite|remind|email|with reminders?|and\s+invite)\b|$)/i,
+  );
+
+  if (withMatch?.[1] && withMatch[2]) {
+    return toDisplayTitle(
+      normalizeTitleCandidate(`${withMatch[1]} with ${withMatch[2]}`),
+    );
+  }
+
+  const aboutMatch = prompt.match(
+    /\b(?:meeting|call|chat|sync|session)\s+(?:about|regarding)\s+([^.,!?]+?)(?=\s+(?:at|for|today|tomorrow|on|later|next|this|invite|remind|email)\b|$)/i,
+  );
+
+  if (aboutMatch?.[1]) {
+    return toDisplayTitle(normalizeTitleCandidate(aboutMatch[1]));
+  }
+
+  return null;
+}
+
+function inferFallbackTitle(prompt: string) {
+  if (/\bappointment\b/i.test(prompt)) {
+    return "Scheduled Appointment";
+  }
+
+  if (/\b(call|phone call)\b/i.test(prompt) && !/\bmeeting\b/i.test(prompt)) {
+    return "Scheduled Call";
+  }
+
+  return "Scheduled Meeting";
+}
+
+function extractSuggestedTitle(prompt: string) {
+  const explicitTitle = extractQuotedTitle(prompt);
+
+  if (explicitTitle) {
+    return explicitTitle;
+  }
+
+  const contextualTitle = extractContextualTitle(prompt);
+
+  if (contextualTitle && !isGenericTitleCandidate(contextualTitle)) {
+    return contextualTitle;
+  }
+
+  return inferFallbackTitle(prompt);
 }
 
 function extractExplicitDurationMinutes(prompt: string) {
@@ -152,6 +241,58 @@ function extractExplicitDurationMinutes(prompt: string) {
   }
 
   return null;
+}
+
+function extractAttendeeEmails(prompt: string) {
+  const matches = prompt.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
+
+  return [...new Set(matches.map((email) => email.toLowerCase()))];
+}
+
+function extractReminderMinutes(prompt: string) {
+  const reminderClauses = [...prompt.matchAll(/\b(?:remind(?: me)?|reminded|reminder(?:s)?|alert(?: me)?)\b([^.!?\n]*)/gi)];
+  const reminderMinutes: number[] = [];
+
+  for (const match of reminderClauses) {
+    const clause = normalizePromptText(match[1] ?? "");
+    const beforeSegment = clause.split(/\bbefore\b/i)[0] ?? clause;
+
+    if (!beforeSegment) {
+      continue;
+    }
+
+    const hasHourUnit = /\b(?:hour|hours|hr|hrs)\b/i.test(beforeSegment);
+    const hasMinuteUnit = /\b(?:minute|minutes|min|mins)\b/i.test(beforeSegment);
+
+    if (hasHourUnit && hasMinuteUnit) {
+      for (const unitMatch of beforeSegment.matchAll(
+        /(\d{1,4})\s*(hour|hours|hr|hrs|minute|minutes|min|mins)\b/gi,
+      )) {
+        const amount = Number(unitMatch[1]);
+        const unit = unitMatch[2].toLowerCase();
+
+        reminderMinutes.push(unit.startsWith("h") ? amount * 60 : amount);
+      }
+
+      continue;
+    }
+
+    const rawNumbers = [...beforeSegment.matchAll(/\d{1,4}/g)].map((numberMatch) =>
+      Number(numberMatch[0]),
+    );
+
+    if (!rawNumbers.length) {
+      continue;
+    }
+
+    for (const amount of rawNumbers) {
+      reminderMinutes.push(hasHourUnit ? amount * 60 : amount);
+    }
+  }
+
+  return reminderMinutes.filter((minutes, index, values) => {
+    return minutes > 0 && minutes <= 10080 && values.indexOf(minutes) === index;
+  });
 }
 
 function inferWindow(prompt: string): PreferredWindow {
@@ -336,10 +477,12 @@ function extractPromptDetails(
   const timing = extractTiming(normalizedPrompt, context.now, context.timeZone);
 
   return {
+    attendeeEmails: extractAttendeeEmails(normalizedPrompt),
     explicitDurationMinutes: extractExplicitDurationMinutes(normalizedPrompt),
     preferredWindow: inferWindow(normalizedPrompt),
     priority: inferPriority(normalizedPrompt, timing),
-    suggestedTitle: extractQuotedTitle(normalizedPrompt),
+    reminderMinutes: extractReminderMinutes(normalizedPrompt),
+    suggestedTitle: extractSuggestedTitle(normalizedPrompt),
     timing,
   };
 }

@@ -24,6 +24,7 @@ type ScheduleInput = {
 type ScheduledSlot = {
   bucket: "today" | "tomorrow" | "later";
   end: Date;
+  matchType: "requested" | "adjusted" | "recommended";
   rationale: string;
   start: Date;
 };
@@ -94,6 +95,10 @@ function getLocalDateKey(date: Date, timeZone: string) {
 function roundUpToQuarterHour(date: Date) {
   const quarterHour = 15 * 60 * 1000;
   return new Date(Math.ceil(date.getTime() / quarterHour) * quarterHour);
+}
+
+function formatClockTime(date: Date, timeZone: string) {
+  return formatInTimeZone(date, timeZone, "h:mm a");
 }
 
 function overlapsBusyBlock(start: Date, end: Date, busyBlocks: BusyBlock[]) {
@@ -189,6 +194,7 @@ function findSlotOnDate(
         return {
           bucket: describeBucket(dayOffset),
           end: slotEnd,
+          matchType: "recommended" as const,
           rationale: rationaleBuilder(matchedWindow),
           start: cursor,
         };
@@ -241,29 +247,60 @@ export function findAvailableSlot(
   busyBlocks: BusyBlock[],
 ): ScheduledSlot | null {
   if (input.timingMode === "exact" && input.requestedStart) {
+    const requestedDateKey = getLocalDateKey(input.requestedStart, input.timeZone);
     const slotEnd = addMinutes(input.requestedStart, input.durationMinutes);
 
-    if (input.requestedStart < input.now) {
-      return null;
+    if (
+      input.requestedStart >= input.now &&
+      !overlapsBusyBlock(input.requestedStart, slotEnd, busyBlocks)
+    ) {
+      const dayOffset = getDayOffsetFromDateKey(
+        requestedDateKey,
+        input.now,
+        input.timeZone,
+      );
+
+      return {
+        bucket: describeBucket(dayOffset),
+        end: slotEnd,
+        matchType: "requested",
+        rationale: "This matches the exact time you asked for.",
+        start: input.requestedStart,
+      };
     }
 
-    if (overlapsBusyBlock(input.requestedStart, slotEnd, busyBlocks)) {
-      return null;
-    }
-
-    const requestedDateKey = getLocalDateKey(input.requestedStart, input.timeZone);
-    const dayOffset = getDayOffsetFromDateKey(
-      requestedDateKey,
-      input.now,
-      input.timeZone,
+    const sameDayEnd = buildZonedDate(requestedDateKey, 23, 59, input.timeZone);
+    let cursor = roundUpToQuarterHour(
+      input.requestedStart > input.now ? input.requestedStart : input.now,
     );
 
-    return {
-      bucket: describeBucket(dayOffset),
-      end: slotEnd,
-      rationale: "This matches the exact time you asked for.",
-      start: input.requestedStart,
-    };
+    while (addMinutes(cursor, input.durationMinutes) <= sameDayEnd) {
+      const alternativeEnd = addMinutes(cursor, input.durationMinutes);
+
+      if (!overlapsBusyBlock(cursor, alternativeEnd, busyBlocks)) {
+        const dayOffset = getDayOffsetFromDateKey(
+          requestedDateKey,
+          input.now,
+          input.timeZone,
+        );
+        const rationale =
+          input.requestedStart < input.now
+            ? `The original time has already passed, so I suggested the next open slot at ${formatClockTime(cursor, input.timeZone)} on the same day.`
+            : `${formatClockTime(input.requestedStart, input.timeZone)} was busy, so I suggested the next open slot at ${formatClockTime(cursor, input.timeZone)} on the same day.`;
+
+        return {
+          bucket: describeBucket(dayOffset),
+          end: alternativeEnd,
+          matchType: "adjusted",
+          rationale,
+          start: cursor,
+        };
+      }
+
+      cursor = addMinutes(cursor, 15);
+    }
+
+    return null;
   }
 
   if (input.timingMode === "day" && input.requestedDateKey) {
